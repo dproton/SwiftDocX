@@ -101,6 +101,13 @@ public class Paragraph {
     /// Whether to insert a page break before this paragraph
     public var pageBreakBefore: Bool
 
+    /// Whether Word keeps this paragraph on the same page as the next one (`w:keepNext`). Inside a table, it keeps
+    /// the row with the next row.
+    public var keepWithNext: Bool
+
+    /// Whether Word keeps every line of this paragraph on one page (`w:keepLines`).
+    public var keepLinesTogether: Bool
+
     /// Creates an empty paragraph
     public init() {
         self.runs = []
@@ -111,6 +118,8 @@ public class Paragraph {
         self.listType = nil
         self.listLevel = 0
         self.pageBreakBefore = false
+        self.keepWithNext = false
+        self.keepLinesTogether = false
     }
 
     /// Creates a paragraph with a single run of text

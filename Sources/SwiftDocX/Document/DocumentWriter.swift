@@ -128,7 +128,8 @@ public class DocumentWriter {
         let documentXML = buildDocumentXMLWithHeaderFooter(
             elements: document.elements,
             headerRelId: headerRelId,
-            footerRelId: footerRelId
+            footerRelId: footerRelId,
+            pageSetup: document.pageSetup
         )
 
         // Build content types
@@ -212,7 +213,8 @@ public class DocumentWriter {
     private func buildDocumentXMLWithHeaderFooter(
         elements: [DocumentElement],
         headerRelId: String?,
-        footerRelId: String?
+        footerRelId: String?,
+        pageSetup: PageSetup
     ) -> String {
         var xml = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -237,8 +239,7 @@ public class DocumentWriter {
         if let footerRelId = footerRelId {
             xml += "<w:footerReference w:type=\"default\" r:id=\"\(footerRelId)\"/>"
         }
-        xml += "<w:pgSz w:w=\"12240\" w:h=\"15840\"/>"
-        xml += "<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"720\" w:footer=\"720\" w:gutter=\"0\"/>"
+        xml += pageSetup.sectionPropertiesXML()
         xml += "</w:sectPr>"
 
         xml += """
@@ -252,75 +253,7 @@ public class DocumentWriter {
     private func buildParagraphXML(_ paragraph: Paragraph) -> String {
         var xml = "<w:p>"
 
-        // Paragraph properties
-        let hasParagraphProps = paragraph.alignment != nil ||
-            paragraph.spacing != .none ||
-            paragraph.indentation != .none ||
-            paragraph.headingLevel != nil ||
-            paragraph.listType != nil ||
-            paragraph.pageBreakBefore
-
-        if hasParagraphProps {
-            xml += "<w:pPr>"
-
-            if paragraph.pageBreakBefore {
-                xml += "<w:pageBreakBefore/>"
-            }
-
-            if let heading = paragraph.headingLevel {
-                xml += "<w:pStyle w:val=\"\(heading.styleId)\"/>"
-            }
-
-            if let listType = paragraph.listType {
-                let numId = listType == .bullet ? 1 : 2
-                xml += "<w:numPr>"
-                xml += "<w:ilvl w:val=\"\(paragraph.listLevel)\"/>"
-                xml += "<w:numId w:val=\"\(numId)\"/>"
-                xml += "</w:numPr>"
-            }
-
-            if let alignment = paragraph.alignment {
-                xml += "<w:jc w:val=\"\(alignment.rawValue)\"/>"
-            }
-
-            if paragraph.spacing != .none {
-                var spacingAttrs = ""
-                if let before = paragraph.spacing.before {
-                    spacingAttrs += " w:before=\"\(Int(before * 20))\""
-                }
-                if let after = paragraph.spacing.after {
-                    spacingAttrs += " w:after=\"\(Int(after * 20))\""
-                }
-                if let lineSpacing = paragraph.spacing.lineSpacing {
-                    spacingAttrs += " w:line=\"\(Int(lineSpacing * 240))\" w:lineRule=\"auto\""
-                }
-                if !spacingAttrs.isEmpty {
-                    xml += "<w:spacing\(spacingAttrs)/>"
-                }
-            }
-
-            if paragraph.indentation != .none {
-                var indentAttrs = ""
-                if let left = paragraph.indentation.left {
-                    indentAttrs += " w:left=\"\(Int(left * 20))\""
-                }
-                if let right = paragraph.indentation.right {
-                    indentAttrs += " w:right=\"\(Int(right * 20))\""
-                }
-                if let firstLine = paragraph.indentation.firstLine {
-                    if firstLine >= 0 {
-                        indentAttrs += " w:firstLine=\"\(Int(firstLine * 20))\""
-                    } else {
-                        indentAttrs += " w:hanging=\"\(Int(-firstLine * 20))\""
-                    }
-                }
-                if !indentAttrs.isEmpty {
-                    xml += "<w:ind\(indentAttrs)/>"
-                }
-            }
-
-            xml += "</w:pPr>"
-        }
+        xml += paragraph.propertiesXML()
 
         // Runs
         for run in paragraph.runs {
@@ -345,27 +278,25 @@ public class DocumentWriter {
 
         xml += "<w:r>"
 
-        if !run.formatting.isEmpty {
-            xml += "<w:rPr>"
-            xml += buildRunPropertiesXML(run.formatting)
-            xml += "</w:rPr>"
-        }
+        // Every run of a page-number field repeats it, or Word shows the number in its default font.
+        let runProperties = run.formatting.propertiesXML()
+        xml += runProperties
 
         // Handle page number field
         if run.isPageNumberField {
             xml += "<w:fldChar w:fldCharType=\"begin\"/></w:r>"
-            xml += "<w:r><w:instrText>PAGE</w:instrText></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
-            xml += "<w:r><w:t>1</w:t></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"end\"/>"
+            xml += "<w:r>\(runProperties)<w:instrText>PAGE</w:instrText></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"separate\"/></w:r>"
+            xml += "<w:r>\(runProperties)<w:t>1</w:t></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"end\"/>"
         }
         // Handle total pages field
         else if run.isTotalPagesField {
             xml += "<w:fldChar w:fldCharType=\"begin\"/></w:r>"
-            xml += "<w:r><w:instrText>NUMPAGES</w:instrText></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
-            xml += "<w:r><w:t>1</w:t></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"end\"/>"
+            xml += "<w:r>\(runProperties)<w:instrText>NUMPAGES</w:instrText></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"separate\"/></w:r>"
+            xml += "<w:r>\(runProperties)<w:t>1</w:t></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"end\"/>"
         }
         // Handle image
         else if let image = run.image, let relId = image.relationshipId {
@@ -387,40 +318,6 @@ public class DocumentWriter {
         // Close hyperlink
         if run.hyperlink != nil && run.hyperlink?.relationshipId != nil {
             xml += "</w:hyperlink>"
-        }
-
-        return xml
-    }
-
-    private func buildRunPropertiesXML(_ formatting: TextFormatting) -> String {
-        var xml = ""
-
-        if formatting.bold { xml += "<w:b/>" }
-        if formatting.italic { xml += "<w:i/>" }
-        if let underline = formatting.underline {
-            xml += "<w:u w:val=\"\(underline.rawValue)\"/>"
-        }
-        if formatting.strikethrough { xml += "<w:strike/>" }
-        if let font = formatting.font {
-            let name = escapeXMLAttribute(font.name)
-            xml += "<w:rFonts w:ascii=\"\(name)\" w:hAnsi=\"\(name)\" w:cs=\"\(name)\"/>"
-        }
-        if let fontSize = formatting.fontSize {
-            let halfPoints = Int(fontSize * 2)
-            xml += "<w:sz w:val=\"\(halfPoints)\"/><w:szCs w:val=\"\(halfPoints)\"/>"
-        }
-        if let color = formatting.color {
-            xml += "<w:color w:val=\"\(color.hexString)\"/>"
-        }
-        if let highlight = formatting.highlight {
-            xml += "<w:highlight w:val=\"\(highlight.rawValue)\"/>"
-        }
-        if formatting.allCaps { xml += "<w:caps/>" }
-        if formatting.smallCaps { xml += "<w:smallCaps/>" }
-        if formatting.superscript {
-            xml += "<w:vertAlign w:val=\"superscript\"/>"
-        } else if formatting.subscriptText {
-            xml += "<w:vertAlign w:val=\"subscript\"/>"
         }
 
         return xml

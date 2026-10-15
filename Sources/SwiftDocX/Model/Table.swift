@@ -73,6 +73,29 @@ public enum VerticalAlignment: String, Sendable {
     case bottom = "bottom"
 }
 
+/// Space between a table cell's border and its text, in points.
+public struct TableCellMargins: Equatable, Sendable {
+    public var top: Double
+    public var left: Double
+    public var bottom: Double
+    public var right: Double
+
+    public init(top: Double, left: Double, bottom: Double, right: Double) {
+        self.top = top
+        self.left = left
+        self.bottom = bottom
+        self.right = right
+    }
+
+    /// The same margin on every side.
+    public static func all(_ points: Double) -> TableCellMargins {
+        return TableCellMargins(top: points, left: points, bottom: points, right: points)
+    }
+
+    /// No margin: the text touches the cell's edges.
+    public static let zero = TableCellMargins.all(0)
+}
+
 /// A cell in a table
 public class TableCell {
     /// Paragraphs in this cell
@@ -137,10 +160,15 @@ public class TableRow {
     /// Whether this is a header row (repeats on each page)
     public var isHeader: Bool
 
+    /// Whether the row must not break across pages (`w:cantSplit`): Word moves the whole row to the next page
+    /// instead. Word cuts off the bottom of such a row when it is taller than a page.
+    public var cantSplit: Bool
+
     public init() {
         self.cells = []
         self.height = nil
         self.isHeader = false
+        self.cantSplit = false
     }
 
     /// Adds a cell with text content
@@ -181,6 +209,13 @@ public class Table {
     /// Table alignment
     public var alignment: ParagraphAlignment?
 
+    /// Whether Word keeps the column widths as given (`w:tblLayout w:type="fixed"`) instead of fitting them to the
+    /// text. Without it, Word widens a column around a long email or URL.
+    public var isFixedLayout: Bool
+
+    /// Space between each cell's border and its text; `nil` keeps Word's default.
+    public var cellMargins: TableCellMargins?
+
     /// Accessibility: Visible table caption/title
     public var accessibilityCaption: String?
 
@@ -195,6 +230,8 @@ public class Table {
         self.alignment = nil
         self.accessibilityCaption = nil
         self.accessibilitySummary = nil
+        self.isFixedLayout = false
+        self.cellMargins = nil
     }
 
     /// Creates a table with the specified number of rows and columns

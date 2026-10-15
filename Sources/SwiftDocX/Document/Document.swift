@@ -78,6 +78,9 @@ public class Document {
     /// Document footer (appears at bottom of pages)
     public var footer: Footer?
 
+    /// Paper size, orientation and margins. `.letter` writes the page SwiftDocX always wrote.
+    public var pageSetup: PageSetup
+
     /// Creates an empty document
     public init() {
         self.paragraphs = []
@@ -86,6 +89,7 @@ public class Document {
         self.properties = DocumentProperties()
         self.header = nil
         self.footer = nil
+        self.pageSetup = .letter
     }
 
     /// Creates a document by reading from a .docx file

@@ -10,7 +10,7 @@ public class DocumentXMLBuilder {
     public init() {}
 
     /// Builds the main document.xml content from document elements
-    public func buildDocumentXML(elements: [DocumentElement]) -> String {
+    public func buildDocumentXML(elements: [DocumentElement], pageSetup: PageSetup = .letter) -> String {
         var xml = """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <w:document xmlns:w="\(XMLNamespaces.wordprocessingML)" xmlns:r="\(XMLNamespaces.relationships)">
@@ -26,13 +26,8 @@ public class DocumentXMLBuilder {
             }
         }
 
-        // Add section properties (required for valid document)
-        xml += """
-        <w:sectPr>
-        <w:pgSz w:w="12240" w:h="15840"/>
-        <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>
-        </w:sectPr>
-        """
+        // Section properties (required for a valid document)
+        xml += "<w:sectPr>" + pageSetup.sectionPropertiesXML() + "</w:sectPr>"
 
         xml += """
         </w:body>
@@ -53,78 +48,7 @@ public class DocumentXMLBuilder {
     private func buildParagraph(_ paragraph: Paragraph) -> String {
         var xml = "<w:p>"
 
-        // Paragraph properties
-        let hasParagraphProps = paragraph.alignment != nil ||
-            paragraph.spacing != .none ||
-            paragraph.indentation != .none ||
-            paragraph.headingLevel != nil ||
-            paragraph.listType != nil ||
-            paragraph.pageBreakBefore
-
-        if hasParagraphProps {
-            xml += "<w:pPr>"
-
-            // Page break before
-            if paragraph.pageBreakBefore {
-                xml += "<w:pageBreakBefore/>"
-            }
-
-            // Style reference for headings
-            if let heading = paragraph.headingLevel {
-                xml += "<w:pStyle w:val=\"\(heading.styleId)\"/>"
-            }
-
-            // Numbering for lists
-            if let listType = paragraph.listType {
-                let numId = listType == .bullet ? 1 : 2
-                xml += "<w:numPr>"
-                xml += "<w:ilvl w:val=\"\(paragraph.listLevel)\"/>"
-                xml += "<w:numId w:val=\"\(numId)\"/>"
-                xml += "</w:numPr>"
-            }
-
-            if let alignment = paragraph.alignment {
-                xml += "<w:jc w:val=\"\(alignment.rawValue)\"/>"
-            }
-
-            if paragraph.spacing != .none {
-                var spacingAttrs = ""
-                if let before = paragraph.spacing.before {
-                    spacingAttrs += " w:before=\"\(Int(before * 20))\""
-                }
-                if let after = paragraph.spacing.after {
-                    spacingAttrs += " w:after=\"\(Int(after * 20))\""
-                }
-                if let lineSpacing = paragraph.spacing.lineSpacing {
-                    spacingAttrs += " w:line=\"\(Int(lineSpacing * 240))\" w:lineRule=\"auto\""
-                }
-                if !spacingAttrs.isEmpty {
-                    xml += "<w:spacing\(spacingAttrs)/>"
-                }
-            }
-
-            if paragraph.indentation != .none {
-                var indentAttrs = ""
-                if let left = paragraph.indentation.left {
-                    indentAttrs += " w:left=\"\(Int(left * 20))\""
-                }
-                if let right = paragraph.indentation.right {
-                    indentAttrs += " w:right=\"\(Int(right * 20))\""
-                }
-                if let firstLine = paragraph.indentation.firstLine {
-                    if firstLine >= 0 {
-                        indentAttrs += " w:firstLine=\"\(Int(firstLine * 20))\""
-                    } else {
-                        indentAttrs += " w:hanging=\"\(Int(-firstLine * 20))\""
-                    }
-                }
-                if !indentAttrs.isEmpty {
-                    xml += "<w:ind\(indentAttrs)/>"
-                }
-            }
-
-            xml += "</w:pPr>"
-        }
+        xml += paragraph.propertiesXML()
 
         // Runs
         for run in paragraph.runs {
@@ -149,27 +73,25 @@ public class DocumentXMLBuilder {
 
         xml += "<w:r>"
 
-        if !run.formatting.isEmpty {
-            xml += "<w:rPr>"
-            xml += buildRunProperties(run.formatting)
-            xml += "</w:rPr>"
-        }
+        // Every run of a page-number field repeats it, or Word shows the number in its default font.
+        let runProperties = run.formatting.propertiesXML()
+        xml += runProperties
 
         // Handle page number field
         if run.isPageNumberField {
             xml += "<w:fldChar w:fldCharType=\"begin\"/></w:r>"
-            xml += "<w:r><w:instrText>PAGE</w:instrText></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
-            xml += "<w:r><w:t>1</w:t></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"end\"/>"
+            xml += "<w:r>\(runProperties)<w:instrText>PAGE</w:instrText></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"separate\"/></w:r>"
+            xml += "<w:r>\(runProperties)<w:t>1</w:t></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"end\"/>"
         }
         // Handle total pages field
         else if run.isTotalPagesField {
             xml += "<w:fldChar w:fldCharType=\"begin\"/></w:r>"
-            xml += "<w:r><w:instrText>NUMPAGES</w:instrText></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"
-            xml += "<w:r><w:t>1</w:t></w:r>"
-            xml += "<w:r><w:fldChar w:fldCharType=\"end\"/>"
+            xml += "<w:r>\(runProperties)<w:instrText>NUMPAGES</w:instrText></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"separate\"/></w:r>"
+            xml += "<w:r>\(runProperties)<w:t>1</w:t></w:r>"
+            xml += "<w:r>\(runProperties)<w:fldChar w:fldCharType=\"end\"/>"
         }
         // Handle image
         else if let image = run.image, let relId = image.relationshipId {
@@ -232,51 +154,6 @@ public class DocumentXMLBuilder {
         """
     }
 
-    private func buildRunProperties(_ formatting: TextFormatting) -> String {
-        var xml = ""
-
-        if formatting.bold {
-            xml += "<w:b/>"
-        }
-        if formatting.italic {
-            xml += "<w:i/>"
-        }
-        if let underline = formatting.underline {
-            xml += "<w:u w:val=\"\(underline.rawValue)\"/>"
-        }
-        if formatting.strikethrough {
-            xml += "<w:strike/>"
-        }
-        if let font = formatting.font {
-            let escapedName = escapeXMLAttribute(font.name)
-            xml += "<w:rFonts w:ascii=\"\(escapedName)\" w:hAnsi=\"\(escapedName)\" w:cs=\"\(escapedName)\"/>"
-        }
-        if let fontSize = formatting.fontSize {
-            let halfPoints = Int(fontSize * 2)
-            xml += "<w:sz w:val=\"\(halfPoints)\"/>"
-            xml += "<w:szCs w:val=\"\(halfPoints)\"/>"
-        }
-        if let color = formatting.color {
-            xml += "<w:color w:val=\"\(color.hexString)\"/>"
-        }
-        if let highlight = formatting.highlight {
-            xml += "<w:highlight w:val=\"\(highlight.rawValue)\"/>"
-        }
-        if formatting.allCaps {
-            xml += "<w:caps/>"
-        }
-        if formatting.smallCaps {
-            xml += "<w:smallCaps/>"
-        }
-        if formatting.superscript {
-            xml += "<w:vertAlign w:val=\"superscript\"/>"
-        } else if formatting.subscriptText {
-            xml += "<w:vertAlign w:val=\"subscript\"/>"
-        }
-
-        return xml
-    }
-
     // MARK: - Table Building
 
     /// Builds XML for a single table element
@@ -290,14 +167,31 @@ public class DocumentXMLBuilder {
         // Table properties
         xml += "<w:tblPr>"
         xml += "<w:tblStyle w:val=\"TableGrid\"/>"
-        xml += "<w:tblW w:w=\"0\" w:type=\"auto\"/>"
-
-        // Table borders
-        xml += buildTableBorders(table.borders)
+        if let width = table.width {
+            xml += "<w:tblW w:w=\"\(width.twips)\" w:type=\"dxa\"/>"
+        } else {
+            xml += "<w:tblW w:w=\"0\" w:type=\"auto\"/>"
+        }
 
         // Table alignment
         if let alignment = table.alignment {
             xml += "<w:jc w:val=\"\(alignment.rawValue)\"/>"
+        }
+
+        // Table borders
+        xml += buildTableBorders(table.borders)
+
+        if table.isFixedLayout {
+            xml += "<w:tblLayout w:type=\"fixed\"/>"
+        }
+
+        if let margins = table.cellMargins {
+            xml += "<w:tblCellMar>"
+            xml += "<w:top w:w=\"\(margins.top.twips)\" w:type=\"dxa\"/>"
+            xml += "<w:left w:w=\"\(margins.left.twips)\" w:type=\"dxa\"/>"
+            xml += "<w:bottom w:w=\"\(margins.bottom.twips)\" w:type=\"dxa\"/>"
+            xml += "<w:right w:w=\"\(margins.right.twips)\" w:type=\"dxa\"/>"
+            xml += "</w:tblCellMar>"
         }
 
         // Accessibility: Caption (visible title) and Description (for screen readers)
@@ -315,7 +209,7 @@ public class DocumentXMLBuilder {
             xml += "<w:tblGrid>"
             for width in table.columnWidths {
                 if let w = width {
-                    xml += "<w:gridCol w:w=\"\(Int(w * 20))\"/>"
+                    xml += "<w:gridCol w:w=\"\(w.twips)\"/>"
                 } else {
                     xml += "<w:gridCol/>"
                 }
@@ -374,8 +268,11 @@ public class DocumentXMLBuilder {
         var xml = "<w:tr>"
 
         // Row properties
-        if row.height != nil || row.isHeader {
+        if row.height != nil || row.isHeader || row.cantSplit {
             xml += "<w:trPr>"
+            if row.cantSplit {
+                xml += "<w:cantSplit/>"
+            }
             if let height = row.height {
                 xml += "<w:trHeight w:val=\"\(Int(height * 20))\"/>"
             }
@@ -408,21 +305,13 @@ public class DocumentXMLBuilder {
         xml += "<w:tcPr>"
 
         if let width = cell.width {
-            xml += "<w:tcW w:w=\"\(Int(width * 20))\" w:type=\"dxa\"/>"
+            xml += "<w:tcW w:w=\"\(width.twips)\" w:type=\"dxa\"/>"
         } else {
             xml += "<w:tcW w:w=\"0\" w:type=\"auto\"/>"
         }
 
         if cell.columnSpan > 1 {
             xml += "<w:gridSpan w:val=\"\(cell.columnSpan)\"/>"
-        }
-
-        if let vAlign = cell.verticalAlignment {
-            xml += "<w:vAlign w:val=\"\(vAlign.rawValue)\"/>"
-        }
-
-        if let bgColor = cell.backgroundColor {
-            xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"\(bgColor.hexString)\"/>"
         }
 
         if let borders = cell.borders {
@@ -432,6 +321,14 @@ public class DocumentXMLBuilder {
             if let bottom = borders.bottom { xml += buildBorder("bottom", bottom) }
             if let right = borders.right { xml += buildBorder("right", right) }
             xml += "</w:tcBorders>"
+        }
+
+        if let bgColor = cell.backgroundColor {
+            xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"\(bgColor.hexString)\"/>"
+        }
+
+        if let vAlign = cell.verticalAlignment {
+            xml += "<w:vAlign w:val=\"\(vAlign.rawValue)\"/>"
         }
 
         xml += "</w:tcPr>"
